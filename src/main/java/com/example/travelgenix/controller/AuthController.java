@@ -1,6 +1,5 @@
 package com.example.travelgenix.controller;
 
-
 import com.example.travelgenix.model.User;
 import com.example.travelgenix.payload.*;
 import com.example.travelgenix.repository.UserRepository;
@@ -15,9 +14,14 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import com.example.travelgenix.payload.UpdateProfileRequest;
+import com.example.travelgenix.payload.ChangePasswordRequest;
+import org.springframework.transaction.annotation.Transactional;
+
 
 @RestController
 @RequestMapping("/api/auth")
@@ -35,6 +39,7 @@ public class AuthController {
         if (userRepository.existsByEmail(request.getEmail())) {
             return new ResponseEntity<>("Email is already in use!", HttpStatus.BAD_REQUEST);
         }
+
         User newUser = new User();
         newUser.setUsername(request.getUsername());
         newUser.setEmail(request.getEmail());
@@ -44,10 +49,18 @@ public class AuthController {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
         SecurityContextHolder.getContext().setAuthentication(authentication);
+
         String jwt = jwtService.generateToken(authentication);
 
-        return ResponseEntity.ok(new AuthResponse(jwt));
+        AuthResponse response = new AuthResponse(
+                jwt,
+                newUser.getUsername(),
+                newUser.getEmail()
+        );
+
+        return ResponseEntity.ok(response);
     }
+
 
     @PostMapping("/login")
     public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest request) {
@@ -57,8 +70,19 @@ public class AuthController {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String jwt = jwtService.generateToken(authentication);
 
-        return ResponseEntity.ok(new AuthResponse(jwt));
+        //User user = (User) authentication.getPrincipal();
+        User user = userRepository.findByEmail(request.getEmail()).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found after successful authentication."));
+
+
+        AuthResponse response = new AuthResponse(
+                jwt,
+                user.getUsername(),
+                user.getEmail()
+        );
+
+        return ResponseEntity.ok(response);
     }
+
 
     @PostMapping("/password-reset-request")
     public ResponseEntity<?> requestPasswordReset(@RequestBody PasswordResetRequest request) {
@@ -97,4 +121,80 @@ public class AuthController {
 
         return ResponseEntity.ok("Password has been successfully reset. You may now log in.");
     }
+
+    /**
+     * Update profile details (username and/or email).
+     */
+
+    @PutMapping("/update")
+    @Transactional
+    public ResponseEntity<?> updateProfile(Authentication authentication, @RequestBody UpdateProfileRequest request) {
+        String currentEmail = authentication.getName();
+
+        User user = userRepository.findByEmail(currentEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        String newEmail = request.getEmail() != null ? request.getEmail().trim() : null;
+        String newUsername = request.getUsername() != null ? request.getUsername().trim() : null;
+
+        if (newEmail != null && !newEmail.isEmpty() && !newEmail.equalsIgnoreCase(user.getEmail())) {
+            if (userRepository.existsByEmail(newEmail)) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body("Email already in use by another account.");
+            }
+            user.setEmail(newEmail);
+        }
+
+        if (newUsername != null && !newUsername.isEmpty()) {
+            user.setUsername(newUsername);
+        }
+
+        userRepository.save(user);
+
+        // Return updated user info (no password). You can return AuthResponse if you prefer to include a fresh token.
+        AuthResponse resp = new AuthResponse(null, user.getUsername(), user.getEmail());
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * Change password for current user. Validates current password.
+     */
+    @PutMapping("/password")
+    @Transactional
+    public ResponseEntity<?> changePassword(Authentication authentication, @RequestBody ChangePasswordRequest request) {
+        String currentEmail = authentication.getName();
+
+        User user = userRepository.findByEmail(currentEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        if (request.getCurrentPassword() == null || request.getNewPassword() == null) {
+            return ResponseEntity.badRequest().body("Both currentPassword and newPassword are required.");
+        }
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Current password does not match.");
+        }
+
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            return ResponseEntity.badRequest().body("New password must be different from the current password.");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        return ResponseEntity.ok("Password changed successfully.");
+    }
+
+    @DeleteMapping("/delete")
+    @Transactional
+    public ResponseEntity<?> deleteAccount(Authentication authentication) {
+        String currentEmail = authentication.getName();
+
+        User user = userRepository.findByEmail(currentEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        userRepository.delete(user);
+
+        return ResponseEntity.ok("Account deleted successfully.");
+    }
+
 }

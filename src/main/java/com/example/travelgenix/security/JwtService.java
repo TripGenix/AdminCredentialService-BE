@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
-
 import java.security.Key;
 import java.util.Date;
 import java.util.HashMap;
@@ -25,7 +24,6 @@ public class JwtService {
     @Value("${jwt.expiration}")
     private long jwtExpiration;
 
-    // 1. Token Generation Methods
 
     public String generateToken(Authentication authentication) {
         String username = authentication.getName();
@@ -41,8 +39,6 @@ public class JwtService {
     }
 
 
-    // 2. Token Validation and Extraction Methods
-
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
     }
@@ -57,9 +53,6 @@ public class JwtService {
         // Check if username matches and the token is not expired
         return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
     }
-
-
-    // 3. Private Helper Methods
 
 
     private boolean isTokenExpired(String token) {

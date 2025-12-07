@@ -1,7 +1,5 @@
 package com.example.travelgenix.payload;
 
-
-
 import lombok.Data;
 
 @Data
